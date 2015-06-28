@@ -8,6 +8,19 @@ var http = require('http').Server(app);
 var io = require('socket.io')(http);
 
 
+var map;
+
+var MAX_PLAYERS = 4;
+var BOMB_RATIO = 2;
+var CODE_SIZE = 6;
+
+var CODE_LEFT = 1;
+var CODE_TOP = 2;
+var CODE_RIGHT = 3;
+var CODE_BOTTOM = 4;
+
+var players = [];
+
 var error = {
 	status: "error",
 	code: 0,
@@ -44,6 +57,13 @@ app.use(session({
 	saveUninitialized: false,
 	secret: "this is a secret passphrase"
 }));
+
+
+function setup() {	
+	var rows = 10,
+		cols = 10;
+	map = generateMap(rows * cols, rows, cols);
+}
 
 
 function auth(username, password, fn) {
@@ -121,16 +141,24 @@ function log(message) {
 
 
 function generateMap(n, rows, cols) {
-	var map = new Array( new Array() );
+	var map = [];
 	for(i = 0; i < rows; i++) {
+		map[i] = [];
 		for(j = 0; j < cols; j++) {
-			map[i][j] = {
-				mine: true,
-				state: 0
-			};
+			var bomb = Math.floor((Math.random() * BOMB_RATIO) + 1);
+			if(bomb > 1)
+				bomb = 0;
+			map[i][j] = [bomb, 0];
 		}
 	}
 	return map;
+}
+
+function generateCode() {
+	var code = "";
+	for(var i = 0; i < CODE_SIZE; i++)
+		code = code + "" + Math.floor((Math.random() * 4) + 1);
+	return code;
 }
 
 
@@ -200,32 +228,90 @@ app.get('/user/:id', function(req, res) {
 	});
 });
 
-
 io.on('connection', function(socket) {
-	log("User connected.");
+	log("---------------------");
+	log("---------------------");
+	log("[Request] connection");
+
+	socket.on('new player', function(username) {
+		
+		if(players.length >= 4) {
+			log("[Emit] serveur full...");
+			socket.emit("server full");
+			socket.emit("disconnect");
+		}
+
+		socket.username = username;
+		players.push(socket);
+		log("[INTERNAL] user " + username + " added to players list");
+		log("[INTERNAL] users : " + players.length + "/" + MAX_PLAYERS);
+		socket.broadcast.emit("new player");
+	});
+
+	/*
+	socket.on('get players list', function() {
+		log("[Request] get player list");
+		socket.emit('players list', players);
+		log("[Emit] player list");
+	});
+	*/
+
+	socket.on('position', function(x, y) {
+		log("[Request] set new position [" + x + "," + y + "]");
+		if(map[x][y][0] == 1) {
+			log("--- BOMB ---");
+			var code = generateCode();
+			log("Code : " + code);
+			io.sockets.emit("bomb");
+		} else {
+			io.broadcast.emit("position", x, y);
+		}
+	});
+
+	socket.on('code', function(token, code) {
+		log("User Code");
+	});
+
+	socket.on('get full map', function(token) {
+		log("[Request] full map");
+		console.log(JSON.stringify(map));
+		socket.emit('full map', map);
+		log("[Emit] full map");
+	});
+
+	socket.on('full map client', function() {
+		log("[Request] map fully loaded by the client");
+		socket.emit('start game');
+		log("[Emit] start the game");
+	});
+
+	socket.on('game loaded', function() {
+		log("[Request] game successfully loaded");
+	});
+
+	socket.on('bomb desengaged', function() {
+		log("BOMB DESENGAGED");
+		socket.broadcast.emit("bomb explode");
+	});	
+
+	socket.on('disconnect', function() {
+		log('[Request] client disconnect');
+		var i = players.indexOf(socket);
+		players.splice(i, 1);
+	});
+
+	socket.on('error', function (err) { console.error(err.stack); });
+
 });
 
-io.on('disconnect', function(socket) {
-	log("User disconnected");
-});
-
-io.on('position', function(socket) {
-	log("get Position");
-});
-
-io.on('position change', function(socket) {
-	log("New Position");
-});
-
-io.on('code', function(socket) {
-	Log("User Code");
-});
 
 
 var server = http.listen( 3000, function() {
 
 	var host = server.address().address;
 	var port = server.address().port;
+
+	setup();
 
 	console.log("Server running at http://%s:%s", host, port);
 
