@@ -1,4 +1,4 @@
-var XMLHttpRequest  = require("xmlhttprequest").XMLHttpRequest;
+var XMLHttpRequest  = require( "xmlhttprequest" ).XMLHttpRequest;
 var colors          = require( 'colors' );
 var shell           = require( 'shelljs' );
 var express 	    = require( 'express' );

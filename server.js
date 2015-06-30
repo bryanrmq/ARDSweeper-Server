@@ -19,6 +19,8 @@ var id = args[1];
 var name = args[2];
 
 var map;
+var rows = 10,
+    cols = 10;
 
 var MAX_PLAYERS = 4;
 var BOMB_RATIO = 5;
@@ -77,10 +79,13 @@ app.use(session({
 
 
 function setup() {
-    var rows = 10,
-        cols = 10;
     map = generateMap(rows * cols, rows, cols);
     log(INFO, "Setting up...");
+}
+
+function restart(fn) {
+    setup();
+    return fn();
 }
 
 function ping() {
@@ -140,17 +145,48 @@ function log(type, message) {
 
 
 function generateMap(n, rows, cols) {
-    var map = [];
-    for(i = 0; i < rows; i++) {
-        map[i] = [];
-        for(j = 0; j < cols; j++) {
+    map = [];
+    for(var y = 0; y < rows; y++) {
+        map[y] = [];
+        for(var x = 0; x < cols; x++) {
             var bomb = Math.floor((Math.random() * BOMB_RATIO) + 1);
             if(bomb > 1)
                 bomb = 0;
-            map[i][j] = [bomb, -1];
+            map[y][x] = [bomb, -1, 0];
         }
     }
+
+    for(var y = 0; y < rows; y++) {
+        for( var x = 0; x < cols; x++) {
+            map[y][x][1] = checkBombsAround(x, y);
+        }
+    }
+
     return map;
+}
+
+function checkBombsAround(x, y) {
+    var n = 0;
+    var length = rows;
+
+    n += (isBomb(y - 1, x - 1) ? 1 : 0); // top left
+    n += (isBomb(y - 1, x) ? 1 : 0); // top center
+    n += (isBomb(y - 1, x + 1) ? 1 : 0); // top right
+    n += (isBomb(y, x - 1) ? 1 : 0); // center left
+    n += (isBomb(y, x + 1) ? 1 : 0); // center right
+    n += (isBomb(y + 1, x - 1) ? 1 : 0); // bottom left
+    n += (isBomb(y + 1, x) ? 1 : 0); // bottom center
+    n += (isBomb(y + 1, x + 1) ? 1 : 0); // bottom right
+
+    return n;
+}
+
+function isBomb(y, x) {
+    if(x < 0 || y < 0 || x >= rows || y >= rows)
+        return false;
+    if(map[y][x][0] == 1)
+        return true;
+    return false;
 }
 
 function generateCode() {
@@ -158,6 +194,19 @@ function generateCode() {
     for(var i = 0; i < CODE_SIZE; i++)
         code = code + "" + Math.floor((Math.random() * 4) + 1);
     return code;
+}
+
+function endGame() {
+    var i = 0;
+    for(var y = 0; y < rows; y++) {
+        for(var x = 0; x < rows; x++) {
+            if(map[y][x][2] == 1)
+                i++;
+        }
+    }
+    if(i == rows * cols)
+        return true;
+    return false;
 }
 
 
@@ -197,7 +246,6 @@ io.on('connection', function(socket) {
         y = parseInt(y);
 
         log(INFO, "[Request] set new position [" + x + "," + y + "]");
-        map[x][y][1] = -2;
         if(map[x][y][0] == 1) {
             map[x][y][1] = -3;
             log(WARNING, "--- BOMB ---");
@@ -205,8 +253,22 @@ io.on('connection', function(socket) {
             log(WARNING, "Code : " + code);
             io.sockets.emit("bomb");
         }
+        map[x][y][2] = 1;
+        var checked = map[x][y][2];
         var state = map[x][y][1];
-        io.sockets.emit("position", x, y, state);
+        io.sockets.emit("position", x, y, state, checked);
+
+        if(endGame()) {
+            log(INFO, "Game Over");
+            io.sockets.emit("game over");
+            log(WARNING, "RESTART");
+            log(WARNING, "RESTART");
+            log(WARNING, "RESTART");
+            io.sockets.emit("restart");
+            restart(function() {
+                io.sockets.emit("restart map");
+            });
+        }
     });
 
     socket.on('code', function(token, code) {
@@ -216,6 +278,7 @@ io.on('connection', function(socket) {
     socket.on('get full map', function(token) {
         log(INFO, "[Request] full map");
         socket.emit('full map', map);
+        log(JSON.stringify(map));
         log(INFO, "[Emit] full map");
     });
 
